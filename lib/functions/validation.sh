@@ -236,13 +236,27 @@ export -f ValidateBooleanVariable
 
 function ValidateLocalGitRepository() {
   debug "Check if ${GITHUB_WORKSPACE} is a Git repository"
-  if ! git -C "${GITHUB_WORKSPACE}" rev-parse --git-dir; then
-    fatal "${GITHUB_WORKSPACE} is not a Git repository."
-  else
+  # Try to validate as a standard git repository or a properly mounted worktree
+  if git -C "${GITHUB_WORKSPACE}" rev-parse --git-dir; then
     debug "${GITHUB_WORKSPACE} is a Git repository"
+    debug "Git branches: $(git -C "${GITHUB_WORKSPACE}" branch -a)"
+    return
   fi
 
-  debug "Git branches: $(git -C "${GITHUB_WORKSPACE}" branch -a)"
+  # If git failed, check if this is a worktree missing its common git dir
+  git_dotfile="${GITHUB_WORKSPACE}/.git"
+  if [ -f "$git_dotfile" ]; then
+    debug ".git is a file, checking for worktree configuration."
+    # Use sed to extract the git common dir from the .git file
+    git_common_dir=$(sed -nE 's|^gitdir:[[:space:]]+(.*)/worktrees/.*$|\1|p' "$git_dotfile")
+    if [ -n "$git_common_dir" ]; then
+      fatal "Detected a git worktree at ${GITHUB_WORKSPACE}, but git cannot operate. Please mount the main git directory located at: $git_common_dir"
+    else
+      fatal "${git_dotfile} exists but does not contain a valid 'gitdir:' line in worktree format."
+    fi
+  else
+    fatal "${GITHUB_WORKSPACE} is not a Git repository."
+  fi
 }
 
 function CheckIfGitRefExists() {
